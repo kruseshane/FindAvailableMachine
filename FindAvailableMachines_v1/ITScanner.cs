@@ -1,7 +1,7 @@
 ﻿using MyPacketCapturer;
 using System;
 using System.Collections.Generic;
-using System.Data.SQLite;
+using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
@@ -18,8 +18,7 @@ namespace FindAvailableMachines
         static string[] subnets = { "208", "209", "210", "211", "212", "213", "214", "215" };
         static string[] subnetHexes = { "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8" };
         string[] ITrooms = { "1201", "1202", "1203", "1204", "2204", "2212", "3208", "3210", "3212", "3214", "3302", "3314" }; // 2208 and 2210 ommited obvious reasons
-        static SQLiteConnection dbConnect_IT;
-        static SQLiteCommand command;
+        static SqlConnection dbConnect_IT;
 
         public ITScanner(frmCapture form)
         {
@@ -595,13 +594,14 @@ namespace FindAvailableMachines
                 if (form.roomSelection.Text == ITrooms[i])
                 {
                     //form.progressLabel.Text = "Resolving users for " + ITrooms[i];
-                    string readData = "select host from machines where host like '%" + ITrooms[i] + "X0%' order by host asc";
-                    command = new SQLiteCommand(readData, dbConnect_IT);
-                    SQLiteDataReader dr = command.ExecuteReader();
+                    string readData = "select host from machine_info where host like '%" + ITrooms[i] + "X0%' order by host asc";
+                    SqlCommand command = new SqlCommand(readData, dbConnect_IT);
+                    SqlDataReader dr = command.ExecuteReader();
                     ListViewItem row = null;
                     while (dr.Read())
                     {
                         string str = findCurrentUser(dr["host"].ToString());
+
                         string user = parseUser(str, ITrooms[i], form); // pass str and current room to parseUser 
                         if (user == "None")
                         {
@@ -741,13 +741,13 @@ namespace FindAvailableMachines
         private static string parseUser(string user, string roomNum, frmCapture form)
         {
             // Get number of entries with specified roomNum
-            string sql = "select count(*) from machines where host like '%" + roomNum + "X0%'";
-            command = new SQLiteCommand(sql, dbConnect_IT);
-            int machineCount = Convert.ToInt32(command.ExecuteScalar());
+            string sql = "select count(*) from machine_info where host like '%" + roomNum + "X0%'";
+            SqlCommand command = new SqlCommand(sql, dbConnect_IT);
+            //int machineCount = Convert.ToInt32(command.ExecuteScalar());
 
             // Find index of 'A'... NOTE: searching for AD/[username]
             int index = user.IndexOf("A", StringComparison.CurrentCulture);
-            form.dbProgress.Maximum = machineCount;
+            form.dbProgress.Maximum = 100;
             char[] c = user.ToCharArray();
 
 

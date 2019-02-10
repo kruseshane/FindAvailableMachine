@@ -13,9 +13,9 @@ using SharpPcap;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
-using System.Data.SQLite;
 using System.Threading;
 using FindAvailableMachines;
+using System.Data.SqlClient;
 
 /*
  * This is a project done for the Computer Security course at Georgia Soutern University.
@@ -39,9 +39,8 @@ namespace MyPacketCapturer
         string[] buildings = { "IT", "COBA", "COE", "ENG", "Carruth" };
         public static string hostname;
         static string[] hosts = new string[2040]; // if all hosts are used, there will be 2040 hostnames
-        static SQLiteConnection dbConnect;
-        static SQLiteCommand command;
-        static string path = "master.sqlite"; // Path to database
+        static SqlDataReader dataReader;
+        static SqlCommand command;
         static List<string> machineTableContents;
         static List<string> hashSetContents;
         int scanLength = 6; // seconds
@@ -50,6 +49,8 @@ namespace MyPacketCapturer
         static string currentMachineIP;
         static string scannableSubnet;
         static int ipResponseCount = 0;
+        static string connStr;
+        static SqlConnection conn;
 
         public frmCapture()
         {
@@ -84,25 +85,12 @@ namespace MyPacketCapturer
             }
 
             setUpUI(this);
-
-            // Set up database
-            if (!File.Exists(path))
-            {
-                Debug.Write("Database file does not exist");
-                SQLiteConnection.CreateFile(path);
-                // Connect to database and create table
-                dbConnect = new SQLiteConnection("Data Source=" + path + ";Version=3;");
-                dbConnect.Open();
-                string table = "create table machines (ip varchar(30), host varchar(30))";
-                command = new SQLiteCommand(table, dbConnect);
-                command.ExecuteNonQuery();
-            } else
-            {
-                Debug.Write("Database exists");
-            }
-
-            dbConnect = new SQLiteConnection("Data Source=" + path + ";Version=3;");
-            dbConnect.Open();
+            
+            connStr = @"Data Source=lablocator2019.ctlracv9acbx.us-east-2.rds.amazonaws.com;Initial Catalog=lablocator;User ID=lablocatorspring2019;Password=LabLocatorSpring2019";
+            conn = new SqlConnection(connStr);
+            conn.Open();
+            Debug.Write(conn.ToString());
+            Debug.Write("Connected");
 
             //Register our handler function to the "packet arrival" event
             device.OnPacketArrival += new SharpPcap.PacketArrivalEventHandler(device_OnPacketArrival);
@@ -210,40 +198,68 @@ namespace MyPacketCapturer
             Debug.Write("Starting database stuff");
 
             // Get number of rows from 'machines' table
-            string sql = "select count(*) from machines";
-            command = new SQLiteCommand(sql, dbConnect);
+            string sql = "select count(*) from machine_info";
+            command = new SqlCommand(sql, conn);
             int count = Convert.ToInt32(command.ExecuteScalar());
 
             if (count > 0)
             {
-                Debug.Write("Machines table has data");
-                string readData = "select * from machines";
+                Debug.Write("machine_info table has data");
+                string readData = "select * from machine_info";
                 machineTableContents = new List<string>();
                 hashSetContents = new List<string>();
-                command = new SQLiteCommand(readData, dbConnect);
-                SQLiteDataReader dr = command.ExecuteReader();
+                command = new SqlCommand(readData, conn);
+                dataReader = command.ExecuteReader();
 
                 // Load table contents into list
-                while (dr.Read())
+                while (dataReader.Read())
                 {
-                    machineTableContents.Add(dr["ip"].ToString());
+                    machineTableContents.Add(dataReader["ip"].ToString());
+                    Debug.Write("IP: " + dataReader["ip"].ToString() + " added to mtc list");
                 }
+
                 // Load hashSet contents into list
                 foreach (string ip in ipAddresses)
                 {
                     hashSetContents.Add(ip);
+                    Debug.Write("IP: " + ip + " added to hsc list");
                 }
 
                 var ipsToAdd = hashSetContents.Except(machineTableContents); // to add
                 var ipsToRemove = machineTableContents.Except(hashSetContents); // to remove
 
+                foreach (var x in machineTableContents)
+                {
+                    foreach (var y in hashSetContents)
+                    {
+                        if (x == y)
+                        {
+                            Debug.Write(x);
+                        }
+                    }
+                }
+                foreach (var ip in machineTableContents)
+                {
+                    //Debug.Write("Remove: " + ip);
+                }
+
+                foreach (var ip in hashSetContents)
+                {
+                    //Debug.Write("Add: " + ip);
+                }
+
                 form.dbProgress.Maximum = ipsToAdd.Count() + ipsToRemove.Count();
+
+                if (!dataReader.IsClosed)
+                {
+                    dataReader.Close();
+                }
 
                 foreach (string ip in ipsToRemove)
                 {
-                    string delete = "delete from machines where ip = '" + ip + "'";
+                    string delete = "delete from machine_info where ip = '" + ip + "'";
                     Debug.Write(ip + " was removed from the table");
-                    command = new SQLiteCommand(delete, dbConnect);
+                    command = new SqlCommand(delete, conn);
                     command.ExecuteNonQuery();
                     form.dbProgress.Value++;
                 }
@@ -257,33 +273,42 @@ namespace MyPacketCapturer
                         continue;
                     }
                     string fullHostName = getHostName(ip);
-                    if (fullHostName == null || fullHostName == "")
+                    if (fullHostName != null && fullHostName != "")
                     {
-                        continue;
+                        string[] host = fullHostName.Split('.');
+                        if (host[0].Contains("CEIT"))
+                        {
+                            Console.WriteLine("Adding " + host[0] + " to the database");
+                            string insert = "insert into machine_info (ip, host, occupied) values ('" + ip + "', '" + host[0] + "', NULL)";
+                            Debug.Write(host[0] + " with an IP Address of " + ip + " was added");
+                            command = new SqlCommand(insert, conn);
+                            command.ExecuteNonQuery();
+                            form.dbProgress.Value++;
+                        }
                     }
-                    string[] host = fullHostName.Split('.');
-                    Console.WriteLine("Adding " + host[0] + " to the database");
-                    string insert = "insert into machines (ip, host) values ('" + ip + "', '" + host[0] + "')";
-                    Debug.Write(host[0] + " with an IP Address of " + ip + " was added");
-                    command = new SQLiteCommand(insert, dbConnect);
-                    command.ExecuteNonQuery();
-                    form.dbProgress.Value++;
                 }
 
             }
             else
             { // table is empty, process takes ~20 minutes
-                Debug.Write("Machines table is empty");
+                Debug.Write("machine_info table is empty");
                 form.dbProgress.Maximum = ipAddresses.Count;
                 foreach (string ip in ipAddresses)
                 {
                     string fullHostName = getHostName(ip);
-                    string[] host = fullHostName.Split('.');
-                    string insert = "insert into machines (ip, host) values ('" + ip + "', '" + host[0] + "')";
-                    Debug.Write(host[0] + " with an IP Address of " + ip + " was added");
-                    command = new SQLiteCommand(insert, dbConnect);
-                    command.ExecuteNonQuery();
-                    form.dbProgress.Value++;
+                    if (fullHostName != null && fullHostName != "")
+                    {
+                        string[] host = fullHostName.Split('.');
+                        if (host[0].Contains("CEIT"))
+                        {
+                            Console.WriteLine("Adding " + host[0] + " to the database");
+                            string insert = "insert into machine_info (ip, host, occupied) values ('" + ip + "', '" + host[0] + "', NULL)";
+                            Debug.Write(host[0] + " with an IP Address of " + ip + " was added");
+                            command = new SqlCommand(insert, conn);
+                            command.ExecuteNonQuery();
+                            form.dbProgress.Value++;
+                        }
+                    }
                 }
             }
 
@@ -323,9 +348,9 @@ namespace MyPacketCapturer
             }
         }
 
-        public SQLiteConnection getDatabaseConnection()
+        public SqlConnection getDatabaseConnection()
         {
-            return dbConnect;
+            return conn;
         }
 
         private void setUpUI(frmCapture form)

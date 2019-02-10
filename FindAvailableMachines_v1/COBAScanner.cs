@@ -1,6 +1,7 @@
 ﻿using MyPacketCapturer;
 using System;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 using System.Data.SQLite;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,8 +18,8 @@ namespace FindAvailableMachines
     {
         frmCapture form;
         string[] COBArooms = { "1117", "1119" };
-        static SQLiteConnection dbConnect_COBA;
-        static SQLiteCommand command;
+        static SqlConnection dbConnect_COBA;
+        static SqlCommand command;
 
         public COBAScanner(frmCapture form)
         {
@@ -244,8 +245,8 @@ namespace FindAvailableMachines
                 {
                     form.progressLabel.Text = "Resolving users for " + COBArooms[i];
                     string readData = "select host from machines where host like '%" + COBArooms[i] + "X0%' order by host asc";
-                    command = new SQLiteCommand(readData, dbConnect_COBA);
-                    SQLiteDataReader dr = command.ExecuteReader();
+                    command = new SqlCommand(readData, dbConnect_COBA);
+                    SqlDataReader dr = command.ExecuteReader();
                     ListViewItem row = null;
                     while (dr.Read())
                     {
@@ -382,7 +383,7 @@ namespace FindAvailableMachines
             process.Start();
             string output = process.StandardOutput.ReadToEnd();
             Debug.Write(output.Length);
-            process.WaitForExit();
+            //process.WaitForExit();
             return output;
         }
 
@@ -390,7 +391,7 @@ namespace FindAvailableMachines
         {
             // Get number of entries with specified roomNum
             string sql = "select count(*) from machines where host like '%" + roomNum + "X0%'";
-            command = new SQLiteCommand(sql, dbConnect_COBA);
+            command = new SqlCommand(sql, dbConnect_COBA);
             int machineCount = Convert.ToInt32(command.ExecuteScalar());
 
             // Find index of 'A'... NOTE: searching for AD/[username]
